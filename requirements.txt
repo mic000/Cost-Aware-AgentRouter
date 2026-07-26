@@ -1,0 +1,21 @@
+# Data access
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0           # parquet I/O for the cleaned subset
+duckdb>=0.10           # reads the full AIDev dump (pyarrow trips on all_pull_request)
+huggingface_hub>=0.20  # hf_hub_download / hf:// dataset access
+
+# Modeling
+scikit-learn>=1.3
+xgboost>=2.0
+sentence-transformers>=2.2   # MiniLM/mpnet/code-aware title embeddings
+
+# Figures / notebook
+matplotlib>=3.7
+jupyter>=1.0
+
+# Testing
+pytest>=7.0   # test_router.py: corpus invariants, split, title cleaner, cell estimator
+
+# Freeze exact versions before submitting the replication package:
+#   pip freeze > requirements.txt

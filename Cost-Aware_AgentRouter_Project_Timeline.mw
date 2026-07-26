@@ -1,0 +1,94 @@
+title: Cost-Aware AgentRouter Project Timeline (Revised 2026-06-07)
+
+#Ming: #c50202
+#Ziming: #0384c4
+#Nhan: #c5be02
+#Jason: #02c5a4
+
+2026-05-16 / 2026-05-20: Finalize project proposal
+  #Team: Nhan, Ziming, Ming, Jason
+  Output: proj_proposal.md (initial draft, drafted off-repo)
+
+2026-05-25: Set up Initialize GitLab project repository
+  #Team: Nhan, Ziming, Ming, Jason
+  Output: GitHub repo with README, proposal.md, notebooks folder, and requirements.txt project-13 repo created on gitlab.csc.uvic.ca
+
+2026-05-27: Commit proposal to repo
+  #Ziming
+  Output: proj_proposal.md committed to main
+
+2026-05-29: Load AIDev dataset, schema inspection, initial cleaning
+  #Ming
+  Output: initial data loading notebook, 00_inspect_data.py, 01_clean_transform.py and all on branch "Dataset-EDA"
+
+2026-06-01/2026-06-03: Draft and refine ethics statement
+  #Ziming
+  Output: Update ethics.md
+
+2026-06-04: Finalize cleaning and undersampling scripts; merge Dataset-EDA into main
+  #Ming  #Nhan
+  Output: "clean dataset upload" by ming, 01_clean_transform.py, 02_undersampling.py and merges of "Dataset-EDA" into main
+
+2026-06-04: Upload cleaned CSV and JSON data files
+  #Ziming
+  Output: add initial cleaned CSV files and Update json data file
+
+2026-06-04/2026-06-06: Build router dataset and pre-treatment notebook
+  #Ziming #Jason
+  Output: build_router_dataset.py, 05_router_pretreatment.ipynb, and "New_dataset_test" ("Add cost-aware router interim report")
+
+2026-06-05/2026-06-06: Generate figures for interim report
+  #Ziming #Jason
+  Output: make_figures.py and fig/ folder on "New_dataset_test"
+
+2026-06-06/2026-06-07: Write and copy-edit interim report
+  #Team
+  Output: interim_report.md, "Update interim report" then "Copy-edit interim report for readability"
+
+2026-06-07: Reconcile proposal with interim report (Option C / hybrid)
+  #Jason
+  Output: proj_proposal.md revised, PROPOSAL_REVIEW.md added (rationale), README.md filled in with real content, requirements.txt added
+
+2026-06-08: Merge "New_dataset_test" into main
+  #Team
+  Output: main consolidated with router-dataset code, interim report, reconciled proposal, real README, requirements.txt, fig
+
+2026-06-08/2026-06-10: Repo-grouped train/val/test split + feature-consistency tests
+  #Nhan
+  Output: 03_make_splits.py, 70/15/15 split by repo_id with recent-month temporal holdout and parity tests across splits
+
+2026-06-08/2026-06-11: Train baseline merge prediction models
+  #Nhan
+  Output: 04_router_baselines.ipynb, logistic regression / random forest / XGBoost results with class-weighted Macro-F1 and AUC (RQ2)
+
+2026-06-08/2026-06-11: Compare agent performance across task types and repositories
+  #Ziming
+  Output: 06_agent_language_breakdown.ipynb, merge rate comparison tables and figures, per-agent x per-language two-proportion z-tests with Bonferroni correction (RQ1)
+
+2026-06-11/2026-06-14: Build cost-aware routing simulation
+  #Ming
+  Output: 07_stage2_triage.ipynb, 08_pareto_sweep.py, utility-based routing results, lambda-sweep over {0, 0.1, 0.5, 1, 5, 10}, 2024-Q4 and 2026-Q2 cost snapshots (RQ3, RQ4)
+
+2026-06-14/2026-06-16: Evaluate models and compare baselines
+  #Team
+  Output: 09_evaluation.ipynb, accuracy, F1, AUC, and routing utility comparison vs "always-best-agent" and "random-agent" baselines
+
+2026-06-14/2026-06-17: Analyze feature importance and limitations
+  #Team
+  Output: 10_shap_analysis.ipynb, feature importance plots and limitations section
+
+2026-06-17/2026-06-20: Write final report
+  #Team
+  Output: final paper draft
+
+2026-06-17/2026-06-19: Create presentation deck and demo notebook
+  #Team
+  Output: presentation.pptx and demo notebook for Jun 24 / Jun 26 session
+
+2026-06-19/2026-06-20: End-to-end re-run + figure regeneration (buffer)
+  #Team
+  Output: pipeline re-run against locked splits, figures regenerated no new modelling
+
+2026-06-20: Final cleanup and submission
+  #Team
+  Output: PDF report, Markdown report, code, notebooks, clean repo submission

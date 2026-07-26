@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>interim_report</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="interim_report_files/libs/clipboard/clipboard.min.js"></script>
+<script src="interim_report_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="interim_report_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="interim_report_files/libs/quarto-html/popper.min.js"></script>
+<script src="interim_report_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="interim_report_files/libs/quarto-html/anchor.min.js"></script>
+<link href="interim_report_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="interim_report_files/libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="interim_report_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="interim_report_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="interim_report_files/libs/bootstrap/bootstrap-138a6193a3bd40baf1e627da441a4734.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+
+
+
+<section id="cost-aware-agentrouter-interim-report" class="level1">
+<h1>Cost-Aware AgentRouter: Interim Report</h1>
+<p><strong>Course:</strong> Summer 2026 CSC 504 <strong>Group 13</strong> <strong>Team:</strong> Ziming Dong, Nhan Huynh, Ming Chen, Jason Thomo</p>
+<hr>
+<section id="introduction-motivation-research-questions" class="level2">
+<h2 class="anchored" data-anchor-id="introduction-motivation-research-questions">1. Introduction, Motivation &amp; Research Questions</h2>
+<p>AI coding agents — Codex, Devin, Copilot, Cursor, and Claude Code — now routinely open pull requests on public GitHub. They differ several-fold in subscription and usage cost (Section 3.5), yet a team typically picks one out of habit. We ask whether that choice can be made better. We frame it as a cost-aware router: given a task, score each agent’s expected success and pick the agent that maximizes success net of cost. We study the question offline on AIDev, a large dataset of agentic pull requests.</p>
+<p>Our main result is cautionary. On success alone, no learned router beats an always-best-agent policy — and that baseline turns out to be a selection-bias artifact rather than proven agent quality. The value of routing is confined to the cost axis, where a simple cell-level router buys a real cost saving at a modest success cost. This report contributes:</p>
+<ul>
+<li>an end-to-end 5-agent cost-aware routing pipeline on AIDev (a balanced 25,580-PR corpus, an XGBoost model with agent-as-input, and a held-out off-policy estimator);</li>
+<li>evidence that the strong always-best-agent baseline is confounded by selection bias and self-merge workflow rather than capability (Sections 4.4–4.5);</li>
+<li>a cost–quality frontier on which a cell cost-gap router gives the best available trade-off (Section 4.3).</li>
+</ul>
+<p>Research questions (from the proposal):</p>
+<ul>
+<li>RQ1. Do the five agents show measurably different merge rates across task categories?</li>
+<li>RQ2. How accurately can a regressor predict per-agent success from task and repository proxy features?</li>
+<li>RQ3. Can a cost-aware router improve the cost–quality trade-off over always-best-agent, and which routing signal achieves it?</li>
+</ul>
+</section>
+<section id="related-work-background" class="level2">
+<h2 class="anchored" data-anchor-id="related-work-background">2. Related Work &amp; Background</h2>
+<p><em>Cost-aware LLM and agent routing.</em> A line of work learns to route queries among models of different cost and quality. RouteLLM [Ong et al.&nbsp;2025] trains a binary router between a strong and a weak model; Hybrid LLM [Ding et al.&nbsp;2024] casts the same problem as quality-aware query routing; and FrugalGPT [Chen et al.&nbsp;2024] cascades models to cut inference cost while preserving accuracy. All three report that learned routing dominates an “always use the strongest model” policy on the cost–quality trade-off. They are evaluated on short-form QA, summarization, and reasoning, however, not on long-horizon software tasks. They also route over a shared input with a near-counterfactual signal — precisely what the observational AIDev setting lacks (Section 5).</p>
+<p><em>Empirical studies on agentic PRs (AIDev).</em> The AIDev dataset [Li et al.&nbsp;2026 and follow-ups] has driven a wave of empirical work on agentic pull requests, covering security, test contribution, code survival, and review themes. This work characterizes what agents do and how well they do it, but it treats agent identity as a descriptive variable rather than a decision. We instead treat the agent as the quantity to be chosen.</p>
+<p><em>JIT defect and merge prediction.</em> A methodologically adjacent line predicts per-commit or per-PR outcomes. Ni et al.&nbsp;(2024) predict defects without modeling which author produced the change. Adding agent identity, as we do, shows that merge is a noisy, confounded label dominated by per-agent base rates (Section 5).</p>
+<hr>
+</section>
+<section id="methods-and-datasets" class="level2">
+<h2 class="anchored" data-anchor-id="methods-and-datasets">3. Methods and Datasets</h2>
+<section id="dataset" class="level3">
+<h3 class="anchored" data-anchor-id="dataset">3.1 Dataset</h3>
+<p>We use AIDev [Li et al.&nbsp;2026], read through DuckDB. We build the corpus from the full dump of about 932k agent PRs rather than the smaller “pop” subset, which holds too few minority-agent PRs to train a 5-agent router (Claude_Code has 459, Cursor 1,541). The steps:</p>
+<ol type="1">
+<li>Filter to the five agents; require a <code>repo_id</code> and non-empty task text.</li>
+<li>Label each PR from <code>state</code> and <code>merged_at</code> (Section 3.2).</li>
+<li>Join repository metadata (<code>language</code>, <code>forks</code>, <code>stars</code>).</li>
+<li>Derive <code>task_type</code> (a conventional-commit rule on the title), <code>has_issue</code> (<code>related_issue</code> linkage), and a partially stripped <code>body_clean</code> (footers, URLs, and agent tokens removed, but emails and some tool names remain; used only in the v1 leaky analysis).</li>
+<li>Balance by down-sampling each agent to the smallest count (Claude_Code, 5,116), giving <strong>25,580 PRs, 5,116 per agent</strong>. Down-sampling keeps each agent’s natural outcome distribution, which carries the routing signal. Built by <code>build_router_dataset.py</code>, written to <code>data/router_dataset.jsonl</code>.</li>
+</ol>
+<p><img src="fig/fig1_dataset_composition.png" class="img-fluid" alt="Dataset composition"> <em><strong>Figure 1.</strong> Outcome distribution per agent (balanced corpus). Per-agent merge rates vary widely (Codex 87.6%, Claude 77.0%, Cursor 72.6%, Devin 64.6%, Copilot 58.6%), and so does the still-open versus closed-unmerged structure (Devin 30% closed-unmerged; Copilot 21% still-open), which points to differing workflows.</em></p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>split (repo-grouped 70/15/15)</th>
+<th>rows</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>train</td>
+<td>18,188</td>
+</tr>
+<tr class="even">
+<td>val</td>
+<td>3,497</td>
+</tr>
+<tr class="odd">
+<td>test</td>
+<td>3,895</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="labels" class="level3">
+<h3 class="anchored" data-anchor-id="labels">3.2 Labels</h3>
+<p>We model a regression target <code>success in {merged: 1.0, still_open: 0.3, closed_unmerged: 0.0}</code>. <em>Limitation (to revisit):</em> <code>still_open</code> is right-censored rather than “0.3 of a success”, and open-rates differ by agent, so the 0.3 heuristic can bias the agent ranking. A binary or censored treatment is planned (Section 6).</p>
+</section>
+<section id="features-two-regimes" class="level3">
+<h3 class="anchored" data-anchor-id="features-two-regimes">3.3 Features (two regimes)</h3>
+<p>The AIDev <code>title</code> and <code>body</code> are the agent-authored PR, produced after the agent acts. They are post-treatment and not available at routing time, so we report two feature regimes:</p>
+<ul>
+<li><em>v1 (initial, leaky).</em> An earlier version used the PR title plus <code>body_clean</code> (frozen MiniLM embeddings, chunked for long text), body-derived difficulty (length, code-block count, stack-trace flag), repo metadata, and <code>task_type</code>. This regime contains post-treatment leakage, which motivated v2.</li>
+<li><em>v2 (reduced-leakage, <code>05_router_pretreatment.ipynb</code>).</em> Drops the PR body and every body-derived feature; uses the cleaned <code>title</code> (agent tokens stripped) as a reduced-leakage task proxy, plus repo metadata (<code>language</code>, log <code>stars</code>, log <code>forks</code>), <code>has_issue</code>, and <code>task_type</code>. The title is itself agent-authored, so this is reduced-leakage rather than strictly pre-treatment.</li>
+</ul>
+<p>In both regimes the agent identity is an input one-hot feature, not the prediction target.</p>
+</section>
+<section id="model-and-routing" class="level3">
+<h3 class="anchored" data-anchor-id="model-and-routing">3.4 Model and routing</h3>
+<p>A single XGBoost regressor learns <code>f(task features, agent) -&gt; success</code>, an implicit table <code>P(success | task, agent)</code>. To route, we score all five agents for a task — holding the base features fixed and swapping the agent one-hot — and then pick an agent. The success-only policy picks <code>argmax_a P(success | x, a)</code>; the cost-aware policy picks <code>argmax_a [ P(success | x, a) - lambda * cost(a) ]</code>.</p>
+<p>The cost-aware objective is conceptual. Copilot is the only agent cheaper than Codex, so the reported frontier is a Codex-to-Copilot budget sweep — an increasing fraction of tasks moved to Copilot — rather than a literal five-agent lambda grid.</p>
+<p>We compare two signals for choosing <em>which</em> tasks to move. The <strong>instance router</strong> uses the XGBoost model’s per-task estimate. The <strong>cell</strong> signal uses a per-(language × task_type) estimate of each agent’s historical success, and we apply it two ways: a success-only <strong>cell argmax router</strong>, and a <strong>cell cost-gap router</strong> that ranks tasks by the cell’s Copilot-minus-Codex success gap (Section 4.3). We also ran an encoder ablation (MiniLM, mpnet, and a code-aware model) and tested per-agent calibration (Section 4).</p>
+<p>The routing policies and baselines compared throughout the report are:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 50%">
+<col style="width: 50%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>routing policy</th>
+<th>how it chooses an agent</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Always-best (Codex)</strong></td>
+<td>always the highest historical-success agent</td>
+</tr>
+<tr class="even">
+<td><strong>Always-cheapest (Copilot)</strong></td>
+<td>always the cheapest agent (the cost anchor)</td>
+</tr>
+<tr class="odd">
+<td><strong>Random</strong></td>
+<td>a random agent</td>
+</tr>
+<tr class="even">
+<td><strong>Most-popular</strong></td>
+<td>the agent most used for the task’s cell in the real-world distribution</td>
+</tr>
+<tr class="odd">
+<td><strong>Instance router</strong></td>
+<td>argmax of the XGBoost per-task success estimate</td>
+</tr>
+<tr class="even">
+<td><strong>Cell argmax router</strong></td>
+<td>argmax of the cell’s historical per-agent success</td>
+</tr>
+<tr class="odd">
+<td><strong>Cell cost-gap router</strong></td>
+<td>moves the tasks whose cell has the smallest Copilot-minus-Codex success gap</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="cost-model" class="level3">
+<h3 class="anchored" data-anchor-id="cost-model">3.5 Cost model</h3>
+<p>The five agents bill on different bases (token API for Codex and Claude, request/credit for Copilot, ACU for Devin, a backend-model pool for Cursor), so we use a <strong>normalized marginal per-PR cost scenario</strong> rather than exact vendor billing. Token-priced agents are sized by an agentic-PR budget (600k input, 200k output) at public API rates; the rest are mapped to an approximate per-PR cost:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>agent</th>
+<th>Copilot</th>
+<th>OpenAI_Codex</th>
+<th>Cursor</th>
+<th>Devin</th>
+<th>Claude_Code</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>$ / PR</td>
+<td>1.10</td>
+<td>3.85</td>
+<td>3.85</td>
+<td>4.50</td>
+<td>4.80</td>
+</tr>
+</tbody>
+</table>
+<p>Basis: Codex from GPT-5.3-Codex ($1.75 / $14 per MTok); Claude from Sonnet ($3 / $15); Cursor is backend-model dependent, with the base using a Codex-class rate; Devin is two ACUs at $2.25; Copilot uses its request/credit pricing.</p>
+<p><em>Limitations:</em> these are scenario costs, not exact billing. The token-priced values depend on the budget assumption and the request/ACU/backend-priced ones on the billing model, and we do not scale cost by task size (the <code>log(forks)</code> proxy collapses because 74% of repos have zero forks). A fuller pricing sweep and task-size scaling are left to future work.</p>
+</section>
+<section id="splits-and-evaluation" class="level3">
+<h3 class="anchored" data-anchor-id="splits-and-evaluation">3.6 Splits and evaluation</h3>
+<p>Splits are grouped by <code>repo_id</code> so that no repo crosses train, validation, or test, and all encoders are fit on the training split only.</p>
+<p>Instance-level counterfactual evaluation is impossible here. In <code>related_issue</code>, only <strong>5 issues</strong> were attempted by two or more distinct agents, so we almost never observe two agents on the same task. We therefore use a subgroup direct-method estimator. We estimate each agent’s success per (language × task_type) cell on the <strong>held-out validation</strong> cells, then use those estimates to value each policy’s test-set choices. Scoring on validation cells — rather than the training cells that the cell-based router routes by — makes the estimate <strong>less circular</strong>. It is not fully independent, since the model’s early stopping also uses validation; bootstrap confidence intervals are planned (Section 6).</p>
+<p>We evaluate the routers (Section 3.4) against four baselines (Section 4.5, Table 2, Figure 6):</p>
+<ul>
+<li><strong>random</strong> — a random agent;</li>
+<li><strong>always-cheapest</strong> — always Copilot, the cost anchor;</li>
+<li><strong>most-popular</strong> — the agent most used for the task’s cell in the real-world distribution, reconstructed by undoing the per-agent down-sampling;</li>
+<li><strong>always-best-agent</strong> — always Codex.</li>
+</ul>
+<p><em>Planned (Section 6):</em> a time-based split, IPW, and bootstrap CIs.</p>
+<hr>
+</section>
+</section>
+<section id="findings" class="level2">
+<h2 class="anchored" data-anchor-id="findings">4. Findings</h2>
+<section id="rq1-agents-differ-by-task-category" class="level3">
+<h3 class="anchored" data-anchor-id="rq1-agents-differ-by-task-category">4.1 RQ1: agents differ by task category</h3>
+<p>Merge rates differ sharply across agents (Figure 2). Across the eight most common task types, Codex ranges from 84% to 89%, against 48% to 66% for Copilot, so RQ1’s premise — that the agents are not interchangeable — holds. The leader barely changes with granularity: Codex has the highest merge rate in each of those eight task types. Only small or fine-grained slices favour another agent — tiny task categories such as <code>perf</code> or <code>chore</code>, or a minority of (language × task_type) cells — and that edge is small and does not survive out-of-sample (Sections 4.5 and 4.6). The heterogeneity is real in level but weak as a routing signal, which Section 4.4 ties to selection bias.</p>
+<p><img src="fig/fig2_agent_tasktype_heatmap.png" class="img-fluid" alt="Agent and task type"> <em><strong>Figure 2.</strong> Merge rate by agent across the eight most common task types. Codex has the highest merge rate in each; the gap to the other agents is wide, and the leading agent does not change across these categories.</em></p>
+</section>
+<section id="rq2-per-agent-success-is-only-marginally-predictable" class="level3">
+<h3 class="anchored" data-anchor-id="rq2-per-agent-success-is-only-marginally-predictable">4.2 RQ2: per-agent success is only marginally predictable</h3>
+<p>The model barely beats a per-agent-mean baseline, and encoder capacity or type does not help. The encoder ablation below runs under the <strong>leaky v1 feature set</strong> (it includes the post-treatment PR body, so these MAEs are optimistic):</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>v1 leaky encoder ablation</th>
+<th>test MAE</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>MiniLM</td>
+<td>0.305</td>
+</tr>
+<tr class="even">
+<td>mpnet-base (110M)</td>
+<td>0.307</td>
+</tr>
+<tr class="odd">
+<td>code-aware (st-codesearch)</td>
+<td>0.297</td>
+</tr>
+</tbody>
+</table>
+<p>Even with that leakage the best encoder (0.297) barely improves on the per-agent-mean baseline below, and encoder type or size hardly moves it. The honest, <strong>reduced-leakage v2</strong> model is what we report everywhere else:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>reduced-leakage v2 model</th>
+<th>test MAE</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>per-agent-mean baseline</td>
+<td>0.331</td>
+</tr>
+<tr class="even">
+<td>v2 (cleaned title + repo)</td>
+<td>0.306</td>
+</tr>
+<tr class="odd">
+<td>v2 (repo metadata only, no text)</td>
+<td>0.309</td>
+</tr>
+</tbody>
+</table>
+<p><em>Takeaway:</em> most predictive power comes from the agent identity; the task text contributes little (dropping it moves MAE only from 0.306 to 0.309), and bigger or code-aware encoders do not change that. The ceiling is the data signal, not the model.</p>
+</section>
+<section id="rq3-a-cell-cost-gap-router-improves-the-costquality-frontier" class="level3">
+<h3 class="anchored" data-anchor-id="rq3-a-cell-cost-gap-router-improves-the-costquality-frontier">4.3 RQ3: a cell cost-gap router improves the cost–quality frontier</h3>
+<p>On success alone, no learned router beats always-best-agent. Under the held-out validation-cell estimator, the instance router scores 0.876 and the cell argmax router 0.862, both below always-Codex at 0.880. A text-free model collapses to always-Codex, and dropping the leaked body features left test MAE essentially unchanged at 0.306, so the task text was never carrying the decision. The value of routing is therefore on the <strong>cost</strong> axis.</p>
+<p>Saving cost means sending some tasks to the only cheaper agent, Copilot, at $1.10 against Codex’s $3.85. Copilot is weaker on average, so the question is <em>which</em> tasks to send. We compare three ways to choose, scored at matched cost (Figure 3):</p>
+<ul>
+<li><strong>random mix</strong> sends a random fraction to Copilot;</li>
+<li><strong>instance router</strong> sends the tasks the XGBoost model rates closest between the two agents;</li>
+<li><strong>cell cost-gap router</strong> sends the tasks whose (language × task_type) cell has the smallest historical Copilot-minus-Codex gap — the cells where the cheap agent loses least.</li>
+</ul>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>mean cost</th>
+<th>random</th>
+<th>instance router</th>
+<th>cell cost-gap router</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>$3.85 (always-Codex)</td>
+<td>0.880</td>
+<td>0.880</td>
+<td>0.880</td>
+</tr>
+<tr class="even">
+<td>$3.30 (14% cheaper)</td>
+<td>0.841</td>
+<td>0.839</td>
+<td><strong>0.855</strong></td>
+</tr>
+<tr class="odd">
+<td>$2.75 (29% cheaper)</td>
+<td>0.801</td>
+<td>0.803</td>
+<td><strong>0.821</strong></td>
+</tr>
+<tr class="even">
+<td>$2.20 (43% cheaper)</td>
+<td>0.761</td>
+<td>0.763</td>
+<td><strong>0.787</strong></td>
+</tr>
+</tbody>
+</table>
+<p><img src="fig/fig3_cost_quality_pareto.png" class="img-fluid" alt="Cost-quality frontier"> *<strong>Figure 3.</strong> Estimated success at matched cost (held-out validation-cell estimator). The instance router is no better than a random mix, because the text signal is too weak to pick tasks. The cell cost-gap router buys about two extra points of success at every cost level (for example 0.821 against 0.803 at 29% lower cost). The frontier still slopes down, so cost savings come at a real success cost, but the cell cost-gap router gives the best available trade-off.</p>
+<p>In cost-versus-best terms, the cell cost-gap router keeps about <strong>93% of always-Codex’s success</strong> (0.821 against 0.880) <strong>at 29% lower cost</strong> ($2.75 against $3.85), and about 97% (0.855) at 14% lower cost.</p>
+</section>
+<section id="why-always-codex-is-so-strong-selection-bias-and-review-intensity" class="level3">
+<h3 class="anchored" data-anchor-id="why-always-codex-is-so-strong-selection-bias-and-review-intensity">4.4 Why always-Codex is so strong: selection bias and review intensity</h3>
+<p>always-Codex simply inherits Codex’s high observed success (87.6% merged, Figure 1), the highest of the five and highest in nearly every cell. This is largely selection bias rather than proven capability (Figure 4):</p>
+<p><img src="fig/fig4_selection_bias_stars.png" class="img-fluid" alt="Selection bias"> <em><strong>Figure 4.</strong> 99% of Codex PRs sit in <code>&lt;500★</code> repos (and none in <code>&gt;5k★</code>), exactly where merge rates are highest for every agent. Codex’s fast self-merge outcome structure (88% merged, 6% closed) contrasts with Copilot’s formal-review pattern (21% still-open). The lead persists under star-difficulty adjustment (Codex’s merge rate is about 14 percentage points above the rate expected from its PRs’ repo-popularity buckets), so the confound is more likely the unobserved self-merge workflow than repo popularity alone.</em></p>
+<p><strong>The advantage is review-driven.</strong> Changing the quality metric exposes the same confound. On the pop subset (which carries review data), Codex also looks strongest on several raw diagnostics (clean-merge rate, changes-requested rate, review burden, commit count), but these diagnostics are review-confounded: 89% of its PRs are never reviewed (self-merged), against 46 to 58% for the others, and an unreviewed PR cannot accumulate changes-requested. Restricting to PRs that <em>were</em> reviewed, Codex’s edge collapses and Cursor is at least as clean (Figure 5):</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>changes-requested rate</th>
+<th>all PRs</th>
+<th>reviewed PRs only</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Cursor</td>
+<td>0.019</td>
+<td><strong>0.039</strong></td>
+</tr>
+<tr class="even">
+<td>Codex</td>
+<td>0.005</td>
+<td>0.047</td>
+</tr>
+<tr class="odd">
+<td>Claude</td>
+<td>0.033</td>
+<td>0.079</td>
+</tr>
+<tr class="even">
+<td>Devin</td>
+<td>0.047</td>
+<td>0.106</td>
+</tr>
+<tr class="odd">
+<td>Copilot</td>
+<td>0.122</td>
+<td>0.226</td>
+</tr>
+</tbody>
+</table>
+<p><img src="fig/fig5_quality.png" class="img-fluid" alt="Review friction"> <em><strong>Figure 5.</strong> Among reviewed PRs, Codex no longer leads: Cursor has the lowest changes-requested rate (0.039 against Codex’s 0.047, within noise). Codex’s raw “quality” is an artifact of 89% of its PRs going unreviewed.</em></p>
+<p>So the agent ranking depends on the quality metric: under a review-friction metric that controls for self-merge, Cursor (which trails Codex on raw merge rate) matches or edges it. We treat this as directional rather than conclusive (pop subset only, observational, a small within-noise gap, and which PRs get reviewed is itself non-random), and flag richer quality labels as future work.</p>
+</section>
+<section id="baselines-best-and-most-popular-are-the-same-agent" class="level3">
+<h3 class="anchored" data-anchor-id="baselines-best-and-most-popular-are-the-same-agent">4.5 Baselines: “best” and “most-popular” are the same agent</h3>
+<p>A richer baseline suite (Table 2, Figure 6) shows that the always-best-agent baseline is numerically close to a most-popular one. The most-popular baseline routes each task to the agent most frequently used for its (language × task_type) cell in the real-world distribution, reconstructed by undoing the per-agent down-sampling. It sends 99% of tasks to Codex and scores 0.879 — essentially equal to always-Codex at 0.880. In other words, the most-used agent and the most-successful agent are the same agent.</p>
+<p>Neither learned router exceeds it: the instance router scores 0.876 and the cell argmax router 0.862. Both occasionally route to pricier agents, so they even cost slightly more than always-Codex (Table 2). Always-Codex therefore dominates them on both success and cost. Always-cheapest (Copilot) anchors the cheap end at 0.682 and $1.10.</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>baseline</th>
+<th>success</th>
+<th>mean $</th>
+<th>Codex share</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Always-cheapest (Copilot)</td>
+<td>0.682</td>
+<td>1.10</td>
+<td>0%</td>
+</tr>
+<tr class="even">
+<td>Random</td>
+<td>0.759</td>
+<td>3.65</td>
+<td>20%</td>
+</tr>
+<tr class="odd">
+<td>Cell argmax router</td>
+<td>0.862</td>
+<td>3.99</td>
+<td>77%</td>
+</tr>
+<tr class="even">
+<td>Instance router</td>
+<td>0.876</td>
+<td>3.92</td>
+<td>92%</td>
+</tr>
+<tr class="odd">
+<td>Most-popular (raw usage)</td>
+<td>0.879</td>
+<td>3.83</td>
+<td>99%</td>
+</tr>
+<tr class="even">
+<td>Always-best (Codex)</td>
+<td>0.880</td>
+<td>3.85</td>
+<td>100%</td>
+</tr>
+</tbody>
+</table>
+<p><em><strong>Table 2.</strong> Success-only routing, scored on the held-out validation-cell estimator. No learned router beats always-Codex; the cell argmax router’s value shows up only under cost pressure (Section 4.3). An in-sample cell oracle reaches 0.93 but is circular (Section 4.6).</em></p>
+<p><img src="fig/fig6_baselines.png" class="img-fluid" alt="Baseline suite"> <em><strong>Figure 6.</strong> Success-only routing (held-out validation-cell estimator). Always-best (Codex) and most-popular coincide at about 0.88 (both route about 99% to Codex), so the strong baseline conflates quality with popularity; no learned router beats it on success alone.</em></p>
+</section>
+<section id="negative-results-that-strengthen-rigor" class="level3">
+<h3 class="anchored" data-anchor-id="negative-results-that-strengthen-rigor">4.6 Negative results that strengthen rigor</h3>
+<ul>
+<li>Removing leakage (v2) did not overturn the negative routing result; it sharpened it.</li>
+<li>Per-agent calibration did not help: it left routing success essentially unchanged (and slightly worse in the earlier v1 setup), so we did not adopt it.</li>
+<li>The cell signal does not help success-only routing: the cell argmax router (0.862) stays below always-Codex (0.880), and an in-sample cell oracle reaches 0.93 only because it is circular. The cell signal pays off solely under cost pressure (Section 4.3).</li>
+</ul>
+<hr>
+</section>
+</section>
+<section id="discussion" class="level2">
+<h2 class="anchored" data-anchor-id="discussion">5. Discussion</h2>
+<p><em>Contrast with cost-aware LLM routing.</em> RouteLLM, Hybrid-LLM, and FrugalGPT report that learned routing dominates an “always strongest” policy on cost and quality. On the success axis for long-horizon software tasks we find the reverse: a learned router does not beat always-best-agent. The difference is the data-generating process. Those works route over a shared input with near-counterfactual signal, whereas AIDev is purely observational. Each task is attempted by exactly one agent (only 5 multi-agent issues), agent assignment is non-random, and “merged” is a workflow-confounded proxy. Our value, like theirs, appears on the cost axis (Figure 3), echoing FrugalGPT’s cost-for-quality trade-off, though here deeper savings carry a real, not negligible, success cost.</p>
+<p><em>Contrast with AIDev empirical studies.</em> Prior AIDev work treats agent identity descriptively. Treating it as a decision variable shows the decision is dominated by one agent whose apparent superiority is heavily confounded (Sections 4.4 and 4.5). What looks like an agent-quality ranking is largely a usage and selection pattern, so the result is cautionary rather than deployable.</p>
+<p><em>Contrast with JIT defect and merge prediction.</em> Adding agent identity confirms that merge is a noisy, confounded label; per-agent base rates dominate the weak task-text (title-proxy) signal.</p>
+<p><em>Methodological takeaway.</em> The binding constraints are the lack of counterfactual overlap and the selection bias, and no encoder, architecture, or calibration change overcomes them. This positions the work as an observational, reduced-leakage feasibility study of agent routing on AIDev.</p>
+<p><em>Threats to validity.</em> Merge is not the same as quality; the <code>still_open=0.3</code> label censors; the cost token-budget is an assumption; the direct-method estimator assumes within-cell exchangeability (no IPW or CIs yet); the population shifts to all repos, including 0-star ones; and <code>task_type</code> is rule-based (about 27% fall into “other”).</p>
+<hr>
+</section>
+<section id="conclusions" class="level2">
+<h2 class="anchored" data-anchor-id="conclusions">6. Conclusions</h2>
+<p>We built an end-to-end 5-agent cost-aware routing pipeline on AIDev: a balanced 25,580-PR corpus, an XGBoost model with agent-as-input, a held-out-cell off-policy estimator, and a cost-aware cell cost-gap frontier. Agents do differ by task (RQ1), but a learned router cannot beat always-best-agent on success. That result is robust to removing post-treatment leakage, and it is largely explained by the selection bias documented in Section 4.5, where the “best” agent turns out to be simply the most-used one. The router’s value is confined to the cost–quality frontier (RQ3): a <strong>cell cost-gap</strong> router gives the best available trade-off, about two points more success than a random or instance router at the same cost. It keeps about 93% of always-Codex’s success at 29% lower cost, though going cheaper still costs real success.</p>
+<p>We will frame the final report as an observational, reduced-leakage feasibility study rather than a deployable per-task router. Planned work: (i) a time-based split with IPW and bootstrap confidence intervals; (ii) a censored or binary treatment of <code>still_open</code>; (iii) a token-budget cost sensitivity sweep; (iv) quality labels beyond merge (review friction, reverts, tests), since the agent ranking is metric-dependent (Section 4.4); and (v) ideally counterfactual or online A/B data, the only real fix for the overlap problem.</p>
+<hr>
+</section>
+<section id="references" class="level2">
+<h2 class="anchored" data-anchor-id="references">References</h2>
+<ul>
+<li>Li, Zhang, and Hassan (2025). <em>The Rise of AI Teammates in Software Engineering (SE) 3.0: How Autonomous Coding Agents Are Reshaping Software Engineering.</em></li>
+<li>Li, Zhang, and Hassan (2026). <em>AIDev: Studying AI Coding Agents on GitHub.</em></li>
+<li>Ong et al.&nbsp;(2025). <em>RouteLLM: Learning to Route LLMs with Preference Data.</em></li>
+<li>Chen, Zaharia, and Zou (2024). <em>FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance.</em></li>
+<li>Ding et al.&nbsp;(2024). <em>Hybrid LLM: Cost-Efficient and Quality-Aware Query Routing.</em></li>
+<li>Jimenez et al.&nbsp;(2024). <em>SWE-bench: Can Language Models Resolve Real-World GitHub Issues?</em></li>
+<li>Cui et al.&nbsp;(2024). <em>The Effects of Generative AI on High-Skilled Work: Evidence from Three Field Experiments with Software Developers.</em></li>
+<li><em>Understanding Dominant Themes in Reviewing Agentic AI-authored Code.</em></li>
+<li>He and Garcia (2009). <em>Learning from Imbalanced Data.</em></li>
+<li>Ni et al.&nbsp;(2024). <em>Just-in-time defect prediction on JavaScript projects: A replication study.</em></li>
+<li>Menzies and Shepperd (2019). <em>Bad Smells in Software Analytics Papers.</em></li>
+</ul>
+<p><em>More routing and cascading references, author/year for the four AIDev follow-up entries, and full BibTeX (venues, DOIs) will be added in the final report.</em></p>
+</section>
+<section id="appendix-artifacts-reproducibility" class="level2">
+<h2 class="anchored" data-anchor-id="appendix-artifacts-reproducibility">Appendix: Artifacts &amp; reproducibility</h2>
+<p><code>build_router_dataset.py</code> (dataset build), <code>05_router_pretreatment.ipynb</code> (the reduced-leakage pipeline), and <code>make_figures.py</code> (regenerates Figures 1 to 6 and the reported numbers; Figure 5 additionally reads <code>pr_reviews</code>). Data read from <code>hf://datasets/hao-li/AIDev</code> through DuckDB.</p>
+<hr>
+<div style="page-break-before: always;">
+
+</div>
+</section>
+<section id="updated-project-timeline" class="level2">
+<h2 class="anchored" data-anchor-id="updated-project-timeline">Updated Project Timeline</h2>
+<p><img src="fig/timeline.png" class="img-fluid" alt="Updated project timeline"> <em><strong>Updated timeline / Gantt chart (revised 2026-06-07), with remaining tasks.</strong> Items before the early-June marker are complete: the proposal, data cleaning, the balanced 25,580-PR router dataset, the reduced-leakage v2 model, the figures, and this interim report. Remaining tasks run to the 2026-06-20 submission: baseline merge-prediction training and agent comparison, the cost-aware routing evaluation and baseline comparison, feature-importance and limitation analysis, the final report, the presentation deck and demo notebook, and a buffer end-to-end re-run with figure regeneration before final cleanup and submission.</em></p>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
