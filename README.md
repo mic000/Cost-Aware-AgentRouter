@@ -1,6 +1,5 @@
-# Cost-Aware AgentRouter (Project 13)
+# Cost-Aware AgentRouter
 
-**Course:** Summer 2026 CSC 504 & SENG 404
 **Team:** Ziming Dong, Nhan Huynh, Ming Chen, Jason Thomo
 
 An offline study of whether the choice of AI coding agent (Codex, Devin, Copilot,
